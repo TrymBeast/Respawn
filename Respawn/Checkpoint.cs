@@ -9,8 +9,9 @@ namespace Respawn
 
     public class Checkpoint
     {
-        private string[] _tablesToDelete;
+        private DatabaseTables _tables;
         private string _deleteSql;
+        private string _disableFKsSql;
 
         public string[] TablesToIgnore { get; set; } = new string[0];
         public string[] SchemasToInclude { get; set; } = new string[0];
@@ -18,8 +19,9 @@ namespace Respawn
         public IDbAdapter DbAdapter { get; set; } = Respawn.DbAdapter.SqlServer;
         public int? CommandTimeout { get; set; }
 
-        private class Relationship
+        internal class Relationship
         {
+            public string Name { get; set; }
             public string PrimaryKeyTable { get; set; }
             public string ForeignKeyTable { get; set; }
 
@@ -52,7 +54,7 @@ namespace Respawn
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandTimeout = CommandTimeout ?? cmd.CommandTimeout;
-                cmd.CommandText = _deleteSql;
+                cmd.CommandText = _deleteSql + _disableFKsSql;
                 cmd.Transaction = tx;
 
                 cmd.ExecuteNonQuery();
@@ -67,12 +69,15 @@ namespace Respawn
 
             var allRelationships = GetRelationships(connection);
 
-            _tablesToDelete = BuildTableList(allTables, allRelationships);
+            _tables = BuildTableList(allTables, allRelationships);
 
-            _deleteSql = DbAdapter.BuildDeleteCommandText(_tablesToDelete);
+            _disableFKsSql = DbAdapter.BuildDisableFKCommandText(_tables.TablesToDisableFKContraints, allRelationships);
+
+            _deleteSql = DbAdapter.BuildDeleteCommandText(_tables.TablesToDelete);
+
         }
 
-        private static string[] BuildTableList(ICollection<string> allTables, IList<Relationship> allRelationships,
+        private static DatabaseTables BuildTableList(ICollection<string> allTables, IList<Relationship> allRelationships,
             List<string> tablesToDelete = null)
         {
             if (tablesToDelete == null)
@@ -90,7 +95,8 @@ namespace Respawn
 
             if (referencedTables.Count > 0 && leafTables.Count == 0)
             {
-                throw new InvalidOperationException("There is a circular dependency between the DB tables and we can't safely build the list of tables to delete.");
+                //throw new InvalidOperationException("There is a circular dependency between the DB tables and we can't safely build the list of tables to delete.");
+                return new DatabaseTables { TablesToDelete = tablesToDelete.ToArray(), TablesToDisableFKContraints = referencedTables.ToArray() };
             }
 
             tablesToDelete.AddRange(leafTables);
@@ -99,10 +105,10 @@ namespace Respawn
             {
                 var relationships = allRelationships.Where(x => !leafTables.Contains(x.ForeignKeyTable)).ToArray();
                 var tables = allTables.Except(leafTables).ToArray();
-                BuildTableList(tables, relationships, tablesToDelete);
+                return BuildTableList(tables, relationships, tablesToDelete);
             }
 
-            return tablesToDelete.ToArray();
+            return new DatabaseTables { TablesToDelete = tablesToDelete.ToArray() };
         }
 
         private IList<Relationship> GetRelationships(DbConnection connection)
@@ -123,8 +129,9 @@ namespace Respawn
                     {
                         var rel = new Relationship
                         {
-                            PrimaryKeyTable = "\"" + reader.GetString(0) + "\".\"" + reader.GetString(1) + "\"",
-                            ForeignKeyTable = "\"" + reader.GetString(2) + "\".\"" + reader.GetString(3) + "\""
+                            Name = reader.GetString(0),
+                            PrimaryKeyTable = "\"" + reader.GetString(1) + "\".\"" + reader.GetString(2) + "\"",
+                            ForeignKeyTable = "\"" + reader.GetString(3) + "\".\"" + reader.GetString(4) + "\""
                         };
                         rels.Add(rel);
                     }

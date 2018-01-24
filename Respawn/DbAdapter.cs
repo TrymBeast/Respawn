@@ -9,6 +9,7 @@
         string BuildTableCommandText(Checkpoint checkpoint);
         string BuildRelationshipCommandText(Checkpoint checkpoint);
         string BuildDeleteCommandText(IEnumerable<string> tablesToDelete);
+        string BuildDisableFKCommandText(string[] p, IEnumerable<Checkpoint.Relationship> allRelationships);
     }
 
     public static class DbAdapter
@@ -54,6 +55,7 @@ WHERE s.principal_id = '1'";
             {
                 string commandText = @"
 select
+   object_name(constid) as name,
    pk_schema.name, so_pk.name,
    fk_schema.name, so_fk.name
 from
@@ -95,6 +97,31 @@ where 1=1";
                 foreach (var tableName in tablesToDelete)
                 {
                     builder.Append(string.Format("delete from {0};\r\n", tableName));
+                }
+                return builder.ToString();
+            }
+
+            public string BuildDisableFKCommandText(string[] tables, IEnumerable<Checkpoint.Relationship> allRelationships)
+            {
+                var builder = new StringBuilder();
+
+                // disable FKs
+                var fkTables = allRelationships.Where(r => !r.IsSelfReferencing && tables.Contains(r.PrimaryKeyTable)).Select(r => r.ForeignKeyTable).Distinct();
+                foreach (var tableName in fkTables)
+                {
+                    builder.Append(string.Format("ALTER TABLE {0} NOCHECK CONSTRAINT ALL;\r\n", tableName));
+                }
+
+                // delete data
+                foreach (var tableName in tables)
+                {
+                    builder.Append(string.Format("delete from {0};\r\n", tableName));
+                }
+
+                // enable FKs
+                foreach (var tableName in fkTables)
+                {
+                    builder.Append(string.Format("ALTER TABLE {0} CHECK CONSTRAINT ALL;\r\n", tableName));
                 }
                 return builder.ToString();
             }
@@ -176,6 +203,11 @@ where 1=1";
                     builder.Append(string.Format("truncate table {0} cascade;\r\n", tableName));
                 }
                 return builder.ToString();
+            }
+
+            public string BuildDisableFKCommandText(string[] p, IEnumerable<Checkpoint.Relationship> allRelationships)
+            {
+                throw new System.NotImplementedException();
             }
         }
     }

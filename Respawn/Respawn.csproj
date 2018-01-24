@@ -38,6 +38,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Checkpoint.cs" />
+    <Compile Include="DatabaseTables.cs" />
     <Compile Include="DbAdapter.cs" />
     <Compile Include="DbExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
