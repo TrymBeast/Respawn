@@ -6,6 +6,7 @@ namespace Respawn
     using System.Data.Common;
     using System.Data.SqlClient;
     using System.Linq;
+    using System.Threading.Tasks;
 
     public class Checkpoint
     {
@@ -17,38 +18,40 @@ namespace Respawn
         public string[] SchemasToInclude { get; set; } = new string[0];
         public string[] SchemasToExclude { get; set; } = new string[0];
         public IDbAdapter DbAdapter { get; set; } = Respawn.DbAdapter.SqlServer;
+
         public int? CommandTimeout { get; set; }
 
-        internal class Relationship
+        public class Relationship
         {
             public string Name { get; set; }
             public string PrimaryKeyTable { get; set; }
             public string ForeignKeyTable { get; set; }
 
             public bool IsSelfReferencing => PrimaryKeyTable == ForeignKeyTable;
+
         }
 
-        public virtual void Reset(string nameOrConnectionString)
+        public virtual async Task Reset(string nameOrConnectionString)
         {
             using (var connection = new SqlConnection(nameOrConnectionString))
             {
-                connection.Open();
+                await connection.OpenAsync();
 
-                Reset(connection);
+                await Reset(connection);
             }
         }
 
-        public virtual void Reset(DbConnection connection)
+        public virtual async Task Reset(DbConnection connection)
         {
             if (string.IsNullOrWhiteSpace(_deleteSql))
             {
-                BuildDeleteTables(connection);
+                await BuildDeleteTables(connection);
             }
 
-            ExecuteDeleteSql(connection);
+            await ExecuteDeleteSqlAsync(connection);
         }
 
-        private void ExecuteDeleteSql(DbConnection connection)
+        private async Task ExecuteDeleteSqlAsync(DbConnection connection)
         {
             using (var tx = connection.BeginTransaction())
             using (var cmd = connection.CreateCommand())
@@ -57,17 +60,17 @@ namespace Respawn
                 cmd.CommandText = _deleteSql + _disableFKsSql;
                 cmd.Transaction = tx;
 
-                cmd.ExecuteNonQuery();
+                await cmd.ExecuteNonQueryAsync();
 
                 tx.Commit();
             }
         }
 
-        private void BuildDeleteTables(DbConnection connection)
+        private async Task BuildDeleteTables(DbConnection connection)
         {
-            var allTables = GetAllTables(connection);
+            var allTables = await GetAllTables(connection);
 
-            var allRelationships = GetRelationships(connection);
+            var allRelationships = await GetRelationships(connection);
 
             _tables = BuildTableList(allTables, allRelationships);
 
@@ -95,8 +98,7 @@ namespace Respawn
 
             if (referencedTables.Count > 0 && leafTables.Count == 0)
             {
-                //throw new InvalidOperationException("There is a circular dependency between the DB tables and we can't safely build the list of tables to delete.");
-                return new DatabaseTables { TablesToDelete = tablesToDelete.ToArray(), TablesToDisableFKContraints = referencedTables.ToArray() };
+               return new DatabaseTables { TablesToDelete = tablesToDelete.ToArray(), TablesToDisableFKContraints = referencedTables.ToArray() };
             }
 
             tablesToDelete.AddRange(leafTables);
@@ -111,27 +113,23 @@ namespace Respawn
             return new DatabaseTables { TablesToDelete = tablesToDelete.ToArray() };
         }
 
-        private IList<Relationship> GetRelationships(DbConnection connection)
+        private async Task<IList<Relationship>> GetRelationships(DbConnection connection)
         {
             var rels = new List<Relationship>();
             var commandText = DbAdapter.BuildRelationshipCommandText(this);
 
-            var values = new List<string>();
-            values.AddRange(TablesToIgnore);
-            values.AddRange(SchemasToExclude);
-            values.AddRange(SchemasToInclude);
-
-            using (var cmd = connection.CreateCommand(commandText, values.ToArray()))
+            using (var cmd = connection.CreateCommand())
             {
-                using (var reader = cmd.ExecuteReader())
+                cmd.CommandText = commandText;
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    while (reader.Read())
+                    while (await reader.ReadAsync())
                     {
                         var rel = new Relationship
                         {
                             Name = reader.GetString(0),
-                            PrimaryKeyTable = "\"" + reader.GetString(1) + "\".\"" + reader.GetString(2) + "\"",
-                            ForeignKeyTable = "\"" + reader.GetString(3) + "\".\"" + reader.GetString(4) + "\""
+                            PrimaryKeyTable = $"{DbAdapter.QuoteCharacter}{reader.GetString(1)}{DbAdapter.QuoteCharacter}.{DbAdapter.QuoteCharacter}{reader.GetString(2)}{DbAdapter.QuoteCharacter}",
+                            ForeignKeyTable = $"{DbAdapter.QuoteCharacter}{reader.GetString(3)}{DbAdapter.QuoteCharacter}.{DbAdapter.QuoteCharacter}{reader.GetString(4)}{DbAdapter.QuoteCharacter}"
                         };
                         rels.Add(rel);
                     }
@@ -141,24 +139,27 @@ namespace Respawn
             return rels;
         }
 
-        private IList<string> GetAllTables(DbConnection connection)
+        private async Task<IList<string>> GetAllTables(DbConnection connection)
         {
             var tables = new List<string>();
 
             string commandText = DbAdapter.BuildTableCommandText(this);
 
-            var values = new List<string>();
-            values.AddRange(TablesToIgnore);
-            values.AddRange(SchemasToExclude);
-            values.AddRange(SchemasToInclude);
-
-            using (var cmd = connection.CreateCommand(commandText, values.ToArray()))
+            using (var cmd = connection.CreateCommand())
             {
-                using (var reader = cmd.ExecuteReader())
+                cmd.CommandText = commandText;
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    while (reader.Read())
+                    while (await reader.ReadAsync())
                     {
-                        tables.Add("\"" + reader.GetString(0) + "\".\"" + reader.GetString(1) + "\"");
+                        if (!await reader.IsDBNullAsync(0))
+                        {
+                            tables.Add($"{DbAdapter.QuoteCharacter}{reader.GetString(0)}{DbAdapter.QuoteCharacter}.{DbAdapter.QuoteCharacter}{reader.GetString(1)}{DbAdapter.QuoteCharacter}");
+                        }
+                        else
+                        {
+                            tables.Add($"{DbAdapter.QuoteCharacter}{reader.GetString(1)}{DbAdapter.QuoteCharacter}");
+                        }
                     }
                 }
             }

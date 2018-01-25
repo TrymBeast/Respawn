@@ -1,6 +1,6 @@
 # Respawn
 
-Respawn is a small utility to help in resetting test databases to a known state. Instead of deleting data at the end of a test or rolling back a transaction, Respawn [resets the database back to a known checkpoint](http://lostechies.com/jimmybogard/2013/06/18/strategies-for-isolating-the-database-in-tests/) by intelligently deleting data from tables.
+Respawn is a small utility to help in resetting test databases to a clean state. Instead of deleting data at the end of a test or rolling back a transaction, Respawn [resets the database back to a clean checkpoint](http://lostechies.com/jimmybogard/2013/06/18/strategies-for-isolating-the-database-in-tests/) by intelligently deleting data from tables.
 
 To use, create a `Checkpoint` and initialize with tables you want to skip, or schemas you want to keep/ignore:
 
@@ -33,15 +33,15 @@ private static Checkpoint checkpoint = new Checkpoint
 
 In your tests, in the fixture setup, reset your checkpoint:
 ```csharp
-checkpoint.Reset("MyConnectionStringName");
+await checkpoint.Reset("MyConnectionStringName");
 ```
 or if you're using a database besides SQL Server, pass an open `DbConnection`:
 ```csharp
 using (var conn = new NpgsqlConnection("ConnectionString"))
 {
-    conn.Open();
+    await conn.OpenAsync();
 
-    checkpoint.Reset(conn);
+    await checkpoint.Reset(conn);
 }
 ```
 
@@ -60,4 +60,18 @@ You should install [Respawn with NuGet](https://www.nuget.org/packages/Respawn):
 
     Install-Package Respawn
 
+Or via the .NET Core CLI:
+
+    dotnet add package Respawn
+
 This command from Package Manager Console will download and install Respawn.
+
+### Local development
+
+To install and run local dependencies needed for tests, (PostgreSQL and MySQL) install Docker for Windows and from the command line at the solution root run:
+
+```
+docker-compose up -d
+```
+
+This will pull down the latest container images and run them. You can then run the local build/tests.

@@ -1,4 +1,7 @@
-﻿namespace Respawn.Tests
+﻿using System.Threading.Tasks;
+using Xunit;
+
+namespace Respawn.Tests
 {
     using System;
     using Npgsql;
@@ -21,8 +24,15 @@
 
         public PostgresTests()
         {
+            var rootConnString = "Server=127.0.0.1;Port=8081;User ID=docker;Password=Password12!;database=postgres";
+            var dbConnString = "Server=127.0.0.1;Port=8081;User ID=docker;Password=Password12!;database={0}";
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPVEYOR")))
+            {
+                rootConnString = "Server=127.0.0.1;Port=5432;User ID=postgres;Password=Password12!;database=postgres";
+                dbConnString = "Server=127.0.0.1;Port=5432;User ID=postgres;Password=Password12!;database={0}";
+            }
             var dbName = DateTime.Now.ToString("yyyyMMddHHmmss") + Guid.NewGuid().ToString("N");
-            using (var connection = new NpgsqlConnection("Server=127.0.0.1;Port=5432;Integrated Security=true;database=postgres"))
+            using (var connection = new NpgsqlConnection(rootConnString))
             {
                 connection.Open();
 
@@ -32,13 +42,14 @@
                     cmd.ExecuteNonQuery();
                 }
             }
-            _connection = new NpgsqlConnection("Server=127.0.0.1;Port=5432;Integrated Security=true;Database=" + dbName);
+            _connection = new NpgsqlConnection(string.Format(dbConnString, dbName));
             _connection.Open();
 
             _database = new Database(_connection, DatabaseType.PostgreSQL);
         }
 
-        public void ShouldDeleteData()
+        [Fact]
+        public async Task ShouldDeleteData()
         {
             _database.Execute("create table \"foo\" (value int)");
 
@@ -54,12 +65,13 @@
                 DbAdapter = DbAdapter.Postgres,
                 SchemasToInclude = new [] { "public" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM \"foo\"").ShouldBe(0);
         }
 
-        public void ShouldIgnoreTables()
+        [Fact]
+        public async Task ShouldIgnoreTables()
         {
             _database.Execute("create table foo (value int)");
             _database.Execute("create table bar (value int)");
@@ -76,13 +88,14 @@
                 SchemasToInclude = new[] { "public" },
                 TablesToIgnore = new[] { "foo" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM bar").ShouldBe(0);
         }
 
-        public void ShouldExcludeSchemas()
+        [Fact]
+        public async Task ShouldExcludeSchemas()
         {
             _database.Execute("create schema a");
             _database.Execute("create schema b");
@@ -100,13 +113,14 @@
                 DbAdapter = DbAdapter.Postgres,
                 SchemasToExclude = new [] { "a", "pg_catalog" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM a.foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM b.bar").ShouldBe(0);
         }
 
-        public void ShouldIncludeSchemas()
+        [Fact]
+        public async Task ShouldIncludeSchemas()
         {
             _database.Execute("create schema a");
             _database.Execute("create schema b");
@@ -124,7 +138,7 @@
                 DbAdapter = DbAdapter.Postgres,
                 SchemasToInclude = new [] { "b" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM a.foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM b.bar").ShouldBe(0);

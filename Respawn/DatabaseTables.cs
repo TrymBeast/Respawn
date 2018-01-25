@@ -8,7 +8,7 @@ namespace Respawn
 {
     internal class DatabaseTables
     {
-        public string[] TablesToDelete { get; set; }
-        public string[] TablesToDisableFKContraints { get; set; }
+        public string[] TablesToDelete { get; set; } = new string[0];
+        public string[] TablesToDisableFKContraints { get; set; } = new string[0];
     }
 }

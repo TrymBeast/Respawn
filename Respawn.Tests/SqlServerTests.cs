@@ -1,15 +1,17 @@
-﻿namespace Respawn.Tests
+﻿using System.Globalization;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace Respawn.Tests
 {
     using System;
     using System.Data.SqlClient;
-    using System.Data.SqlLocalDb;
     using System.Linq;
     using NPoco;
     using Shouldly;
 
     public class SqlServerTests : IDisposable
     {
-        private readonly TemporarySqlLocalDbInstance _instance;
         private SqlConnection _connection;
         private readonly Database _database;
 
@@ -24,18 +26,26 @@
 
         public SqlServerTests()
         {
-            _instance = TemporarySqlLocalDbInstance.Create(deleteFiles: true);
+            var isAppVeyor = Environment.GetEnvironmentVariable("Appveyor")?.ToUpperInvariant() == "TRUE";
 
-            _connection = _instance.CreateConnection();
+            var connString =
+                isAppVeyor
+                    ? @"Server=(local)\SQL2016;Database=tempdb;User ID=sa;Password=Password12!"
+                    : @"Server=.;Database=tempdb;Integrated Security=True";
+
+            _connection = new SqlConnection(connString);
             _connection.Open();
 
             _database = new Database(_connection);
 
+            _database.Execute(@"DROP DATABASE IF EXISTS SqlServerTests");
             _database.Execute("create database [SqlServerTests]");
         }
 
-        public void ShouldDeleteData()
+        [Fact]
+        public async Task ShouldDeleteData()
         {
+            _database.Execute("drop table if exists Foo");
             _database.Execute("create table Foo (Value [int])");
 
             _database.InsertBulk(Enumerable.Range(0, 100).Select(i => new Foo { Value = i }));
@@ -43,13 +53,16 @@
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM Foo").ShouldBe(100);
 
             var checkpoint = new Checkpoint();
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM Foo").ShouldBe(0);
         }
 
-        public void ShouldIgnoreTables()
+        [Fact]
+        public async Task ShouldIgnoreTables()
         {
+            _database.Execute("drop table if exists Foo");
+            _database.Execute("drop table if exists Bar");
             _database.Execute("create table Foo (Value [int])");
             _database.Execute("create table Bar (Value [int])");
 
@@ -60,14 +73,19 @@
             {
                 TablesToIgnore = new[] {"Foo"}
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM Foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM Bar").ShouldBe(0);
         }
 
-        public void ShouldExcludeSchemas()
+        [Fact]
+        public async Task ShouldExcludeSchemas()
         {
+            _database.Execute("drop table if exists A.Foo");
+            _database.Execute("drop table if exists B.Bar");
+            _database.Execute("drop schema if exists A");
+            _database.Execute("drop schema if exists B");
             _database.Execute("create schema A");
             _database.Execute("create schema B");
             _database.Execute("create table A.Foo (Value [int])");
@@ -83,14 +101,19 @@
             {
                 SchemasToExclude = new [] { "A" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM A.Foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM B.Bar").ShouldBe(0);
         }
 
-        public void ShouldIncludeSchemas()
+        [Fact]
+        public async Task ShouldIncludeSchemas()
         {
+            _database.Execute("drop table if exists A.Foo");
+            _database.Execute("drop table if exists B.Bar");
+            _database.Execute("drop schema if exists A");
+            _database.Execute("drop schema if exists B");
             _database.Execute("create schema A");
             _database.Execute("create schema B");
             _database.Execute("create table A.Foo (Value [int])");
@@ -106,7 +129,7 @@
             {
                 SchemasToInclude = new [] { "B" }
             };
-            checkpoint.Reset(_connection);
+            await checkpoint.Reset(_connection);
 
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM A.Foo").ShouldBe(100);
             _database.ExecuteScalar<int>("SELECT COUNT(1) FROM B.Bar").ShouldBe(0);
@@ -116,12 +139,9 @@
 
         public void Dispose()
         {
-            _database.Execute("drop database [SqlServerTests]");
             _connection.Close();
             _connection.Dispose();
             _connection = null;
-
-            _instance.Dispose();
         }
     }
 }
